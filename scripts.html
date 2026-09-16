@@ -1,0 +1,317 @@
+<script>
+google.charts.load('current',{packages:['corechart']});
+let STATE = {pessoas:[], formasPagamento:[], contas:[], competenciaAtual:'', dashboard:null, lancamentos:[], planejamento:null};
+
+document.addEventListener('DOMContentLoaded', () => {
+  bindNav();
+  bindNature();
+  setLoading(true);
+  google.script.run
+    .withSuccessHandler(data => {
+      STATE = data;
+      hydrateSelectors();
+      setDefaults();
+      renderContas();
+      renderDiario(data.lancamentos || []);
+      renderDashboard(data.dashboard);
+      renderPlanejamento(data.planejamento);
+      setLoading(false);
+    })
+    .withFailureHandler(handleError)
+    .getBootstrapData();
+});
+
+function bindNav(){
+  document.querySelectorAll('.navBtn[data-view]').forEach(btn=>{
+    btn.addEventListener('click',()=>showView(btn.dataset.view));
+  });
+}
+function showView(name){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+  document.querySelectorAll('.navBtn[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
+  const titles={dashboard:['Dashboard','Visão geral das finanças do casal'],registrar:['Novo lançamento','Registre uma movimentação em poucos segundos'],diario:['Diário financeiro','Consulte todos os registros'],planejamento:['Planejamento','Organize os próximos meses'],contas:['Plano de Contas','Estruture receitas, despesas e resultados']};
+  document.getElementById('viewTitle').textContent=titles[name][0];
+  document.getElementById('viewSubtitle').textContent=titles[name][1];
+  if(name==='diario') loadDiario();
+  if(name==='planejamento') loadPlanejamento();
+}
+function bindNature(){
+  document.querySelectorAll('.nature').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('.nature').forEach(x=>x.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('natureza').value=btn.dataset.nature;
+      filterAccountsByNature(btn.dataset.nature);
+    });
+  });
+}
+function hydrateSelectors(){
+  fillSelect('globalPessoa',STATE.pessoas,'nome','nome',true,'Casal');
+  fillSelect('pessoa',STATE.pessoas,'nome','nome');
+  fillSelect('pagoPor',STATE.pessoas,'nome','nome');
+  fillSelect('fPessoa',STATE.pessoas,'nome','nome',true,'Todas as pessoas');
+  initSearchableFields();
+  filterAccountsByNature('Despesa');
+  const groups=[...new Set(STATE.contas.map(c=>c.grupo).filter(Boolean))].sort().map(x=>({v:x,t:x}));
+  fillSelect('fGrupo',groups,'v','t',true,'Todos os grupos');
+}
+function fillSelect(id,data,valueKey,textKey,keepFirst=false,firstText=''){
+  const el=document.getElementById(id); if(!el)return;
+  const current=el.value;
+  el.innerHTML=keepFirst?`<option value="">${firstText}</option>`:'';
+  data.forEach(x=>{const o=document.createElement('option');o.value=x[valueKey];o.textContent=x[textKey];el.appendChild(o)});
+  if(current) el.value=current;
+}
+function filterAccountsByNature(nature){
+  clearSearchableValue('contaBusca','contaId');
+  renderSearchOptions('contaBusca','contaId','contaOptions',getContaItems(),'', 'id','conta');
+}
+function getContaItems(){
+  const nature=val('natureza');
+  return STATE.contas.filter(c=>c.classificacao===nature);
+}
+function initSearchableFields(){
+  setupSearchableSelect({inputId:'contaBusca',hiddenId:'contaId',menuId:'contaOptions',items:()=>getContaItems(),valueKey:'id',textKey:'conta'});
+  setupSearchableSelect({inputId:'formaPagamentoBusca',hiddenId:'formaPagamentoId',menuId:'formaPagamentoOptions',items:()=>STATE.formasPagamento,valueKey:'id',textKey:'nome'});
+}
+function setupSearchableSelect(cfg){
+  const input=document.getElementById(cfg.inputId);
+  const menu=document.getElementById(cfg.menuId);
+  if(!input||!menu)return;
+  const draw=()=>renderSearchOptions(cfg.inputId,cfg.hiddenId,cfg.menuId,cfg.items(),input.value,cfg.valueKey,cfg.textKey);
+  input.addEventListener('focus',draw);
+  input.addEventListener('input',()=>{document.getElementById(cfg.hiddenId).value='';draw()});
+  input.addEventListener('blur',()=>{
+    setTimeout(()=>{
+      const items=cfg.items();
+      const exact=items.find(x=>normalizeSearch(x[cfg.textKey])===normalizeSearch(input.value));
+      if(exact){input.value=exact[cfg.textKey];document.getElementById(cfg.hiddenId).value=exact[cfg.valueKey]}
+      menu.classList.add('hidden');
+    },150);
+  });
+}
+function renderSearchOptions(inputId,hiddenId,menuId,items,query,valueKey,textKey){
+  const menu=document.getElementById(menuId);
+  if(!menu)return;
+  const q=normalizeSearch(query);
+  const filtered=(items||[]).filter(x=>!q||normalizeSearch(x[textKey]).includes(q)).slice(0,30);
+  menu.innerHTML='';
+  if(!filtered.length){menu.innerHTML='<div class="searchSelectEmpty">Nenhum resultado encontrado.</div>';menu.classList.remove('hidden');return}
+  filtered.forEach(item=>{
+    const btn=document.createElement('button');btn.type='button';btn.className='searchSelectOption';btn.textContent=item[textKey];
+    btn.addEventListener('mousedown',e=>{e.preventDefault();document.getElementById(inputId).value=item[textKey];document.getElementById(hiddenId).value=item[valueKey];menu.classList.add('hidden')});
+    menu.appendChild(btn);
+  });
+  menu.classList.remove('hidden');
+}
+function clearSearchableValue(inputId,hiddenId){
+  const input=document.getElementById(inputId),hidden=document.getElementById(hiddenId);
+  if(input)input.value='';if(hidden)hidden.value='';
+}
+function normalizeSearch(v){
+  return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+function setDefaults(){
+  const today=new Date();
+  const iso=today.toISOString().slice(0,10);
+  const comp=STATE.competenciaAtual || iso.slice(0,7);
+  document.getElementById('dataLancamento').value=iso;
+  document.getElementById('competenciaLancamento').value=comp;
+  document.getElementById('globalCompetencia').value=comp;
+  document.getElementById('planCompetencia').value=comp;
+}
+function onCompetenciaChange(){
+  document.getElementById('planCompetencia').value=document.getElementById('globalCompetencia').value;
+  refreshDashboard();
+  loadDiario();
+}
+function refreshDashboard(){
+  setLoading(true);
+  google.script.run.withSuccessHandler(d=>{renderDashboard(d);setLoading(false)}).withFailureHandler(handleError)
+    .getDashboard({competencia:document.getElementById('globalCompetencia').value,pessoa:document.getElementById('globalPessoa').value});
+  google.script.run.withSuccessHandler(renderAcerto).withFailureHandler(handleError)
+    .getAcertoCompartilhado(document.getElementById('globalCompetencia').value);
+}
+function renderDashboard(d){
+  if(!d)return;
+  STATE.dashboard=d;
+  text('kpiReceitas',money(d.receitas)); text('kpiDespesas',money(d.despesas)); text('kpiResultado',money(d.resultado));
+  text('kpiDisponivel',money(d.disponivel)); text('kpiPoupanca',fmtPct(d.taxaPoupanca));
+  google.charts.setOnLoadCallback(()=>drawCharts(d));
+  google.script.run.withSuccessHandler(renderAcerto).withFailureHandler(()=>{}).getAcertoCompartilhado(d.competencia);
+}
+function renderAcerto(x){
+  const el=document.getElementById('acertoCompartilhado');
+  if(!x){el.textContent='Sem dados';return}
+  if(Math.abs(x.saldoMatheus)<0.01){el.textContent='Tudo acertado entre Matheus e Cássia.'}
+  else if(x.saldoMatheus>0){el.textContent=`Cássia deve ${money(x.saldoMatheus)} para Matheus.`}
+  else{el.textContent=`Matheus deve ${money(Math.abs(x.saldoMatheus))} para Cássia.`}
+}
+function drawCharts(d){
+  const opts={legend:{position:'none'},backgroundColor:'transparent',chartArea:{left:65,top:20,width:'72%',height:'72%'},hAxis:{textStyle:{fontSize:11}},vAxis:{textStyle:{fontSize:11}},colors:['#111827']};
+  drawBar('chartDespesas',d.topDespesas||[],opts);
+  drawBar('chartReceitas',d.topReceitas||[],opts);
+  const evo=[['Mês','Receitas','Despesas'],...(d.evolucao||[]).map(x=>[x.competencia,x.receita,x.despesa])];
+  new google.visualization.LineChart(document.getElementById('chartEvolucao')).draw(google.visualization.arrayToDataTable(evo),{...opts,legend:{position:'bottom'},colors:['#0f766e','#b91c1c']});
+  const pp=[['Pessoa','Receitas','Despesas'],...(d.porPessoa||[]).map(x=>[x.pessoa,x.receita,x.despesa])];
+  new google.visualization.ColumnChart(document.getElementById('chartPessoas')).draw(google.visualization.arrayToDataTable(pp),{...opts,legend:{position:'bottom'},colors:['#0f766e','#b91c1c']});
+}
+function drawBar(id,rows,opts){
+  const data=[['Categoria','Valor'],...rows.map(x=>[x.nome,x.valor])];
+  new google.visualization.BarChart(document.getElementById(id)).draw(google.visualization.arrayToDataTable(data),opts);
+}
+function toggleShared(){document.getElementById('sharedBox').classList.toggle('hidden',!document.getElementById('compartilhado').checked)}
+function toggleParcel(){document.getElementById('parcelBox').classList.toggle('hidden',!document.getElementById('parcelado').checked)}
+function toggleCustomSplit(){
+  const custom=document.getElementById('tipoDivisao').value==='PERSONALIZADA';
+  document.getElementById('lblMatheus').classList.toggle('hidden',!custom);document.getElementById('lblCassia').classList.toggle('hidden',!custom);
+}
+async function submitLancamento(e){
+  e.preventDefault(); setLoading(true);
+  try{
+    const anexo=await readFile(document.getElementById('anexo').files[0]);
+    if(!val('contaId')) throw new Error('Selecione uma conta válida na lista.');
+    if(!val('formaPagamentoId')) throw new Error('Selecione uma forma de pagamento válida na lista.');
+    const p={
+      natureza:val('natureza'),pessoa:val('pessoa'),dataLancamento:val('dataLancamento'),competencia:val('competenciaLancamento'),
+      contaId:val('contaId'),formaPagamentoId:val('formaPagamentoId'),valor:Number(val('valor')),
+      compartilhado:document.getElementById('compartilhado').checked,pagoPor:val('pagoPor'),tipoDivisao:val('tipoDivisao'),
+      percMatheus:Number(val('percMatheus')||50),percCassia:Number(val('percCassia')||50),
+      parcelado:document.getElementById('parcelado').checked,totalParcelas:Number(val('totalParcelas')||1),
+      observacao:val('observacao'),anexo
+    };
+    google.script.run.withSuccessHandler(r=>{toast(r.quantidade>1?`${r.quantidade} parcelas registradas.`:'Lançamento salvo.');resetLancamentoForm();setLoading(false);refreshDashboard();})
+      .withFailureHandler(handleError).salvarLancamento(p);
+  }catch(err){handleError(err)}
+}
+function readFile(file){
+  if(!file)return Promise.resolve(null);
+  if(file.size>5*1024*1024)return Promise.reject(new Error('O anexo ultrapassa 5 MB.'));
+  return new Promise((resolve,reject)=>{
+    const rd=new FileReader();rd.onload=()=>resolve({name:file.name,mimeType:file.type,data:rd.result});rd.onerror=reject;rd.readAsDataURL(file);
+  });
+}
+function resetLancamentoForm(){
+  const n=val('natureza');
+  document.getElementById('formLancamento').reset();
+  document.getElementById('natureza').value=n;
+  setDefaults();toggleShared();toggleParcel();filterAccountsByNature(n);clearSearchableValue('formaPagamentoBusca','formaPagamentoId');
+}
+function loadDiario(){
+  const f={competencia:val('globalCompetencia'),pessoa:val('fPessoa'),natureza:val('fNatureza'),grupo:val('fGrupo')};
+  google.script.run.withSuccessHandler(renderDiario).withFailureHandler(handleError).getLancamentos(f);
+}
+function renderDiario(rows){
+  STATE.lancamentos=rows||[];
+  const tbody=document.getElementById('diarioBody');
+  tbody.innerHTML='';
+  if(!rows||!rows.length){tbody.innerHTML='<tr><td colspan="9">Nenhum lançamento encontrado.</td></tr>';return}
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${brDate(r.dataLancamento)}</td><td>${esc(r.pessoa)}</td><td><span class="badge ${r.natureza.toLowerCase()}">${esc(r.natureza)}</span></td>
+      <td>${esc(r.conta)}</td><td>${esc(r.formaPagamento)}</td><td><strong>${money(r.valor)}</strong></td>
+      <td>${r.compartilhado?'Sim':'Não'}</td><td>${r.parcelado?`${r.parcelaAtual}/${r.totalParcelas}`:'-'}</td>
+      <td><button class="linkBtn" title="Excluir" onclick="deleteEntry('${r.id}')">🗑️</button>${r.anexoUrl?`<a class="linkBtn" href="${r.anexoUrl}" target="_blank">📎</a>`:''}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+function deleteEntry(id){
+  if(!confirm('Excluir este lançamento?'))return;
+  setLoading(true);
+  google.script.run.withSuccessHandler(()=>{toast('Lançamento excluído.');setLoading(false);loadDiario();refreshDashboard()}).withFailureHandler(handleError).excluirLancamento(id);
+}
+function exportExcel(){
+  setLoading(true);
+  const f={competencia:val('globalCompetencia'),pessoa:val('fPessoa'),natureza:val('fNatureza'),grupo:val('fGrupo')};
+  google.script.run.withSuccessHandler(r=>{setLoading(false);toast('Excel gerado.');window.open(r.url,'_blank')}).withFailureHandler(handleError).exportLancamentosExcel(f);
+}
+function renderContas(){
+  const tbody=document.getElementById('contasBody');tbody.innerHTML='';
+  if(!STATE.contas.length){tbody.innerHTML='<tr><td colspan="7">Nenhuma conta cadastrada.</td></tr>';return}
+  STATE.contas.forEach(c=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(c.classificacao)}</td><td>${esc(c.tipoConta)}</td><td>${esc(c.grupo)}</td><td>${esc(c.subgrupo)}</td><td><strong>${esc(c.conta)}</strong></td><td>${c.compartilhavel?'Sim':'Não'}</td><td><div class="tableActions"><button class="actionBtn" type="button" onclick="editConta('${c.id}')">Editar</button><button class="actionBtn danger" type="button" onclick="deleteConta('${c.id}')">Excluir</button></div></td>`;
+    tbody.appendChild(tr);
+  })
+}
+function openContaModal(){
+  document.getElementById('formConta').reset();
+  document.getElementById('cId').value='';
+  document.getElementById('contaModalTitle').textContent='Nova conta';
+  document.getElementById('contaModal').classList.remove('hidden');
+}
+function editConta(id){
+  const c=STATE.contas.find(x=>String(x.id)===String(id));
+  if(!c)return toast('Conta não encontrada.',true);
+  document.getElementById('cId').value=c.id;
+  document.getElementById('cClass').value=c.classificacao;
+  document.getElementById('cTipo').value=c.tipoConta||'';
+  document.getElementById('cGrupo').value=c.grupo||'';
+  document.getElementById('cSubgrupo').value=c.subgrupo||'';
+  document.getElementById('cConta').value=c.conta||'';
+  document.getElementById('cCompart').checked=!!c.compartilhavel;
+  document.getElementById('contaModalTitle').textContent='Editar conta';
+  document.getElementById('contaModal').classList.remove('hidden');
+}
+function closeContaModal(){
+  document.getElementById('contaModal').classList.add('hidden');
+  document.getElementById('formConta').reset();
+  document.getElementById('cId').value='';
+}
+function submitConta(e){
+  e.preventDefault();setLoading(true);
+  const id=val('cId');
+  const p={id:id||'',classificacao:val('cClass'),tipoConta:val('cTipo'),grupo:val('cGrupo'),subgrupo:val('cSubgrupo'),conta:val('cConta'),compartilhavel:document.getElementById('cCompart').checked,ativo:true};
+  google.script.run.withSuccessHandler(()=>{
+    toast(id?'Conta atualizada.':'Conta cadastrada.');closeContaModal();reloadContas();
+  }).withFailureHandler(handleError).salvarConta(p);
+}
+function deleteConta(id){
+  const c=STATE.contas.find(x=>String(x.id)===String(id));
+  const nome=c?c.conta:'esta conta';
+  if(!confirm(`Excluir "${nome}" do Plano de Contas?\n\nEla deixará de aparecer em novos lançamentos, mas os lançamentos antigos serão preservados.`))return;
+  setLoading(true);
+  google.script.run.withSuccessHandler(()=>{toast('Conta excluída do Plano de Contas.');reloadContas()}).withFailureHandler(handleError).excluirConta(id);
+}
+function reloadContas(){
+  google.script.run.withSuccessHandler(rows=>{
+    STATE.contas=rows||[];renderContas();filterAccountsByNature(val('natureza'));
+    const groups=[...new Set(STATE.contas.map(c=>c.grupo).filter(Boolean))].sort().map(x=>({v:x,t:x}));
+    fillSelect('fGrupo',groups,'v','t',true,'Todos os grupos');
+    setLoading(false);
+  }).withFailureHandler(handleError).listarContas();
+}
+function loadPlanejamento(){
+  const c=val('planCompetencia')||val('globalCompetencia'); if(!c)return;
+  google.script.run.withSuccessHandler(renderPlanejamento).withFailureHandler(handleError).getPlanejamento(c);
+}
+function renderPlanejamento(p){
+  if(!p)return;
+  document.getElementById('planCompetencia').value=p.competencia||val('globalCompetencia');
+  document.getElementById('planReceita').value=p.receitaEstimada||'';
+  document.getElementById('planInvest').value=p.metaInvestimento||'';
+  document.getElementById('planReserva').value=p.reserva||'';
+  document.getElementById('planObs').value=p.observacao||'';
+  updatePlanPreview();
+}
+['planReceita','planInvest','planReserva'].forEach(id=>document.addEventListener('input',e=>{if(e.target.id===id)updatePlanPreview()}));
+function updatePlanPreview(){
+  const receita=Number(val('planReceita')||0),invest=Number(val('planInvest')||0),reserva=Number(val('planReserva')||0);
+  document.getElementById('planningPreview').innerHTML=`Limite planejado para despesas: <strong>${money(Math.max(0,receita-invest-reserva))}</strong>`;
+}
+function submitPlanejamento(e){
+  e.preventDefault();setLoading(true);
+  const p={competencia:val('planCompetencia'),receitaEstimada:Number(val('planReceita')||0),metaInvestimento:Number(val('planInvest')||0),reserva:Number(val('planReserva')||0),observacao:val('planObs')};
+  google.script.run.withSuccessHandler(()=>{toast('Planejamento salvo.');setLoading(false);document.getElementById('globalCompetencia').value=p.competencia;refreshDashboard()}).withFailureHandler(handleError).salvarPlanejamento(p);
+}
+function setLoading(v){document.getElementById('loader').classList.toggle('hidden',!v)}
+function handleError(err){setLoading(false);toast((err&&err.message)||String(err),true);console.error(err)}
+function toast(msg,isError=false){const t=document.getElementById('toast');t.textContent=msg;t.style.background=isError?'#991b1b':'#111827';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200)}
+function money(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}
+function fmtPct(v){return Number(v||0).toLocaleString('pt-BR',{maximumFractionDigits:1})+'%'}
+function text(id,v){document.getElementById(id).textContent=v}
+function val(id){return document.getElementById(id)?.value||''}
+function brDate(s){if(!s)return'';const [y,m,d]=s.split('-');return `${d}/${m}/${y}`}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+</script>

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
+  <?!= include('styles'); ?>
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brandMark">₿</div>
+        <div>
+          <strong>Finanças</strong>
+          <small>Matheus & Cássia</small>
+        </div>
+      </div>
+      <nav id="desktopNav">
+        <button class="navBtn active" data-view="dashboard">📊 <span>Dashboard</span></button>
+        <button class="navBtn" data-view="registrar">➕ <span>Registrar</span></button>
+        <button class="navBtn" data-view="diario">📖 <span>Diário</span></button>
+        <button class="navBtn" data-view="planejamento">🎯 <span>Planejamento</span></button>
+        <button class="navBtn" data-view="contas">🗂️ <span>Plano de Contas</span></button>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="viewTitle">Dashboard</h1>
+          <p id="viewSubtitle">Visão geral das finanças do casal</p>
+        </div>
+        <div class="topActions">
+          <select id="globalPessoa" onchange="refreshDashboard()">
+            <option value="">Casal</option>
+          </select>
+          <input id="globalCompetencia" type="month" onchange="onCompetenciaChange()">
+        </div>
+      </header>
+
+      <section id="view-dashboard" class="view active">
+        <div class="kpiGrid">
+          <article class="kpi"><span>Receitas</span><strong id="kpiReceitas">R$ 0,00</strong><small>recebido no mês</small></article>
+          <article class="kpi"><span>Despesas</span><strong id="kpiDespesas">R$ 0,00</strong><small>gasto no mês</small></article>
+          <article class="kpi"><span>Resultado</span><strong id="kpiResultado">R$ 0,00</strong><small>receitas - despesas</small></article>
+          <article class="kpi emphasis"><span>Ainda podemos gastar</span><strong id="kpiDisponivel">R$ 0,00</strong><small>conforme planejamento</small></article>
+          <article class="kpi"><span>Taxa de poupança</span><strong id="kpiPoupanca">0%</strong><small>resultado / receitas</small></article>
+        </div>
+
+        <div class="grid2">
+          <article class="card"><div class="cardHead"><h3>Maiores gastos</h3></div><div id="chartDespesas" class="chart"></div></article>
+          <article class="card"><div class="cardHead"><h3>Maiores receitas</h3></div><div id="chartReceitas" class="chart"></div></article>
+        </div>
+        <div class="grid2">
+          <article class="card"><div class="cardHead"><h3>Evolução mensal</h3></div><div id="chartEvolucao" class="chart"></div></article>
+          <article class="card"><div class="cardHead"><h3>Matheus × Cássia</h3></div><div id="chartPessoas" class="chart"></div></article>
+        </div>
+        <article class="card">
+          <div class="cardHead"><h3>Acerto compartilhado</h3></div>
+          <div id="acertoCompartilhado" class="sharedBalance">Calculando...</div>
+        </article>
+      </section>
+
+      <section id="view-registrar" class="view">
+        <article class="card formCard">
+          <div class="natureSwitch">
+            <button type="button" class="nature active expense" data-nature="Despesa">Despesa</button>
+            <button type="button" class="nature income" data-nature="Receita">Receita</button>
+            <button type="button" class="nature result" data-nature="Resultado">Resultado</button>
+          </div>
+
+          <form id="formLancamento" onsubmit="submitLancamento(event)">
+            <input type="hidden" id="natureza" value="Despesa">
+            <div class="formGrid">
+              <label>Quem registrou / responsável
+                <select id="pessoa" required></select>
+              </label>
+              <label>Data
+                <input id="dataLancamento" type="date" required>
+              </label>
+              <label>Competência
+                <input id="competenciaLancamento" type="month" required>
+              </label>
+              <label>Conta
+                <div class="searchSelect" id="contaSearchSelect">
+                  <input id="contaBusca" type="text" autocomplete="off" placeholder="Digite para buscar uma conta..." required>
+                  <input id="contaId" type="hidden">
+                  <div id="contaOptions" class="searchSelectMenu hidden"></div>
+                </div>
+              </label>
+              <label>Forma de pagamento
+                <div class="searchSelect" id="formaSearchSelect">
+                  <input id="formaPagamentoBusca" type="text" autocomplete="off" placeholder="Digite para buscar..." required>
+                  <input id="formaPagamentoId" type="hidden">
+                  <div id="formaPagamentoOptions" class="searchSelectMenu hidden"></div>
+                </div>
+              </label>
+              <label>Valor total
+                <input id="valor" type="number" min="0.01" step="0.01" placeholder="0,00" required>
+              </label>
+            </div>
+
+            <div class="optionRow">
+              <label class="toggleLine"><input id="compartilhado" type="checkbox" onchange="toggleShared()"> Gasto compartilhado</label>
+              <label class="toggleLine"><input id="parcelado" type="checkbox" onchange="toggleParcel()"> Parcelado</label>
+            </div>
+
+            <div id="sharedBox" class="subBox hidden">
+              <div class="formGrid">
+                <label>Quem pagou
+                  <select id="pagoPor"></select>
+                </label>
+                <label>Divisão
+                  <select id="tipoDivisao" onchange="toggleCustomSplit()">
+                    <option value="MEIO">50 / 50</option>
+                    <option value="PERSONALIZADA">Personalizada</option>
+                  </select>
+                </label>
+                <label id="lblMatheus" class="hidden">% Matheus
+                  <input id="percMatheus" type="number" min="0" max="100" step="0.01" value="50">
+                </label>
+                <label id="lblCassia" class="hidden">% Cássia
+                  <input id="percCassia" type="number" min="0" max="100" step="0.01" value="50">
+                </label>
+              </div>
+            </div>
+
+            <div id="parcelBox" class="subBox hidden">
+              <label>Quantidade de parcelas
+                <input id="totalParcelas" type="number" min="2" max="120" value="2">
+              </label>
+              <small>O valor informado será dividido automaticamente entre as competências futuras.</small>
+            </div>
+
+            <details class="moreOptions">
+              <summary>Mais opções</summary>
+              <div class="formGrid">
+                <label>Observações
+                  <textarea id="observacao" rows="3" placeholder="Detalhes do lançamento..."></textarea>
+                </label>
+                <label>Comprovante / nota fiscal
+                  <input id="anexo" type="file" accept="image/*,.pdf">
+                  <small>Limite recomendado: 5 MB.</small>
+                </label>
+              </div>
+            </details>
+
+            <div class="formActions">
+              <button class="primary" type="submit">Salvar lançamento</button>
+              <button class="secondary" type="button" onclick="resetLancamentoForm()">Limpar</button>
+            </div>
+          </form>
+        </article>
+      </section>
+
+      <section id="view-diario" class="view">
+        <article class="card">
+          <div class="cardHead">
+            <div>
+              <h3>Diário financeiro</h3>
+              <small>Filtre, confira e exporte os lançamentos.</small>
+            </div>
+            <button class="secondary" onclick="exportExcel()">Exportar Excel</button>
+          </div>
+          <div class="filters">
+            <select id="fPessoa" onchange="loadDiario()"><option value="">Todas as pessoas</option></select>
+            <select id="fNatureza" onchange="loadDiario()"><option value="">Todas as naturezas</option><option>Receita</option><option>Despesa</option><option>Resultado</option></select>
+            <select id="fGrupo" onchange="loadDiario()"><option value="">Todos os grupos</option></select>
+          </div>
+          <div class="tableWrap">
+            <table>
+              <thead><tr><th>Data</th><th>Pessoa</th><th>Natureza</th><th>Conta</th><th>Pagamento</th><th>Valor</th><th>Compart.</th><th>Parcela</th><th></th></tr></thead>
+              <tbody id="diarioBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="view-planejamento" class="view">
+        <article class="card formCard">
+          <div class="cardHead"><div><h3>Planejamento mensal</h3><small>Defina o espaço financeiro antes de gastar.</small></div></div>
+          <form id="formPlanejamento" onsubmit="submitPlanejamento(event)">
+            <div class="formGrid">
+              <label>Competência
+                <input id="planCompetencia" type="month" required onchange="loadPlanejamento()">
+              </label>
+              <label>Receita estimada
+                <input id="planReceita" type="number" step="0.01" min="0">
+              </label>
+              <label>Meta de investimentos
+                <input id="planInvest" type="number" step="0.01" min="0">
+              </label>
+              <label>Reserva do mês
+                <input id="planReserva" type="number" step="0.01" min="0">
+              </label>
+            </div>
+            <label>Observação
+              <textarea id="planObs" rows="3"></textarea>
+            </label>
+            <div class="planningPreview" id="planningPreview"></div>
+            <div class="formActions"><button class="primary" type="submit">Salvar planejamento</button></div>
+          </form>
+        </article>
+      </section>
+
+      <section id="view-contas" class="view">
+        <article class="card">
+          <div class="cardHead">
+            <div><h3>Plano de Contas</h3><small>Cadastre a estrutura usada nos lançamentos e dashboards.</small></div>
+            <button class="primary" onclick="openContaModal()">+ Nova conta</button>
+          </div>
+          <div class="tableWrap">
+            <table>
+              <thead><tr><th>Classificação</th><th>Tipo</th><th>Grupo</th><th>Subgrupo</th><th>Conta</th><th>Compart.</th><th class="actionsCol">Ações</th></tr></thead>
+              <tbody id="contasBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <nav class="bottomNav">
+      <button class="navBtn active" data-view="dashboard">📊<span>Início</span></button>
+      <button class="navBtn" data-view="registrar">➕<span>Registrar</span></button>
+      <button class="navBtn" data-view="diario">📖<span>Diário</span></button>
+      <button class="navBtn" data-view="planejamento">🎯<span>Planejar</span></button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div id="loader" class="loader hidden"><div></div></div>
+
+  <div id="contaModal" class="modal hidden">
+    <div class="modalCard">
+      <div class="cardHead"><h3 id="contaModalTitle">Nova conta</h3><button class="iconBtn" onclick="closeContaModal()">✕</button></div>
+      <form id="formConta" onsubmit="submitConta(event)">
+        <input id="cId" type="hidden">
+        <div class="formGrid">
+          <label>Classificação<select id="cClass" required><option>Receita</option><option>Despesa</option><option>Resultado</option></select></label>
+          <label>Tipo da conta<input id="cTipo" placeholder="Ex.: Despesa variável"></label>
+          <label>Grupo<input id="cGrupo" placeholder="Ex.: Transporte"></label>
+          <label>Subgrupo<input id="cSubgrupo" placeholder="Ex.: Combustível"></label>
+          <label>Conta<input id="cConta" required placeholder="Ex.: Gasolina"></label>
+          <label class="toggleLine"><input id="cCompart" type="checkbox"> Pode ser compartilhada</label>
+        </div>
+        <div class="formActions"><button class="primary" type="submit">Salvar conta</button><button class="secondary" type="button" onclick="closeContaModal()">Cancelar</button></div>
+      </form>
+    </div>
+  </div>
+
+  <?!= include('scripts'); ?>
+</body>
+</html>
